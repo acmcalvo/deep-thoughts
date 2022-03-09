@@ -1,67 +1,75 @@
-const addDateSuffix = date => {
-  let dateStr = date.toString();
+const faker = require('faker');
 
-  // get last char of date string
-  const lastChar = dateStr.charAt(dateStr.length - 1);
+const db = require('../config/connection');
+const { Thought, User } = require('../models');
 
-  if (lastChar === '1' && dateStr !== '11') {
-    dateStr = `${dateStr}st`;
-  } else if (lastChar === '2' && dateStr !== '12') {
-    dateStr = `${dateStr}nd`;
-  } else if (lastChar === '3' && dateStr !== '13') {
-    dateStr = `${dateStr}rd`;
-  } else {
-    dateStr = `${dateStr}th`;
+db.once('open', async () => {
+  await Thought.deleteMany({});
+  await User.deleteMany({});
+
+  // create user data
+  const userData = [];
+
+  for (let i = 0; i < 50; i += 1) {
+    const username = faker.internet.userName();
+    const email = faker.internet.email(username);
+    const password = faker.internet.password();
+
+    userData.push({ username, email, password });
   }
 
-  return dateStr;
-};
+  const createdUsers = await User.collection.insertMany(userData);
 
-// function to format a timestamp, accepts the timestamp and an `options` object as parameters
-module.exports = (
-  timestamp,
-  { monthLength = 'short', dateSuffix = true } = {}
-) => {
-  // create month object
-  const months = {
-    0: monthLength === 'short' ? 'Jan' : 'January',
-    1: monthLength === 'short' ? 'Feb' : 'February',
-    2: monthLength === 'short' ? 'Mar' : 'March',
-    3: monthLength === 'short' ? 'Apr' : 'April',
-    4: monthLength === 'short' ? 'May' : 'May',
-    5: monthLength === 'short' ? 'Jun' : 'June',
-    6: monthLength === 'short' ? 'Jul' : 'July',
-    7: monthLength === 'short' ? 'Aug' : 'August',
-    8: monthLength === 'short' ? 'Sep' : 'September',
-    9: monthLength === 'short' ? 'Oct' : 'October',
-    10: monthLength === 'short' ? 'Nov' : 'November',
-    11: monthLength === 'short' ? 'Dec' : 'December'
-  };
+  // create friends
+  for (let i = 0; i < 100; i += 1) {
+    const randomUserIndex = Math.floor(Math.random() * createdUsers.ops.length);
+    const { _id: userId } = createdUsers.ops[randomUserIndex];
 
-  const dateObj = new Date(timestamp);
-  const formattedMonth = months[dateObj.getMonth()];
+    let friendId = userId;
 
-  const dayOfMonth = dateSuffix
-    ? addDateSuffix(dateObj.getDate())
-    : dateObj.getDate();
+    while (friendId === userId) {
+      const randomUserIndex = Math.floor(Math.random() * createdUsers.ops.length);
+      friendId = createdUsers.ops[randomUserIndex];
+    }
 
-  const year = dateObj.getFullYear();
-  let hour =
-    dateObj.getHours() > 12
-      ? Math.floor(dateObj.getHours() / 2)
-      : dateObj.getHours();
-
-  // if hour is 0 (12:00am), change it to 12
-  if (hour === 0) {
-    hour = 12;
+    await User.updateOne({ _id: userId }, { $addToSet: { friends: friendId } });
   }
 
-  const minutes = dateObj.getMinutes();
+  // create thoughts
+  let createdThoughts = [];
+  for (let i = 0; i < 100; i += 1) {
+    const thoughtText = faker.lorem.words(Math.round(Math.random() * 20) + 1);
 
-  // set `am` or `pm`
-  const periodOfDay = dateObj.getHours() >= 12 ? 'pm' : 'am';
+    const randomUserIndex = Math.floor(Math.random() * createdUsers.ops.length);
+    const { username, _id: userId } = createdUsers.ops[randomUserIndex];
 
-  const formattedTimeStamp = `${formattedMonth} ${dayOfMonth}, ${year} at ${hour}:${minutes} ${periodOfDay}`;
+    const createdThought = await Thought.create({ thoughtText, username });
 
-  return formattedTimeStamp;
-};
+    const updatedUser = await User.updateOne(
+      { _id: userId },
+      { $push: { thoughts: createdThought._id } }
+    );
+
+    createdThoughts.push(createdThought);
+  }
+
+  // create reactions
+  for (let i = 0; i < 100; i += 1) {
+    const reactionBody = faker.lorem.words(Math.round(Math.random() * 20) + 1);
+
+    const randomUserIndex = Math.floor(Math.random() * createdUsers.ops.length);
+    const { username } = createdUsers.ops[randomUserIndex];
+
+    const randomThoughtIndex = Math.floor(Math.random() * createdThoughts.length);
+    const { _id: thoughtId } = createdThoughts[randomThoughtIndex];
+
+    await Thought.updateOne(
+      { _id: thoughtId },
+      { $push: { reactions: { reactionBody, username } } },
+      { runValidators: true }
+    );
+  }
+
+  console.log('all done!');
+  process.exit(0);
+});
